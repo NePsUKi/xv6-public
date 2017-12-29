@@ -20,3 +20,13 @@
 #define SYS_link   19
 #define SYS_mkdir  20
 #define SYS_close  21
+#define SYS_halt   22
+#define SYS_alarm  23
+#define SYS_date   24
+#define SYS_getAllPids 25
+#define SYS_getppid 26
+#define SYS_cps 27
+#define SYS_chpr 28
+#define SYS_prisleep 29
+#define SYS_priawake 30
+#define SYS_timerx 31

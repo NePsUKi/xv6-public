@@ -6,6 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "pstat.h"
 
 struct {
   struct spinlock lock;
@@ -65,11 +66,67 @@ myproc(void) {
   return p;
 }
 
+int cps()
+{
+  struct proc *p;
+
+  sti();
+
+  acquire(&ptable.lock);
+  cprintf("Name\tPid\tState\t\tPri.\tSize\tParent\n");
+  for (p = ptable.proc; p< &ptable.proc[NPROC];p++)
+  {
+    if (p->state == SLEEPING)
+    { 
+     
+      cprintf("%s\t%d\tSLEEPING\t%d\t%d\t", p->name, p->pid, p->priority, p->sz);
+      if(p->parent)
+      {
+        cprintf("%d", p->parent->pid);
+      }
+      else
+        cprintf("parent");
+      cprintf("\n");
+    }
+    else if(p->state == RUNNING)
+    {
+      /*if(p->name[0]=='p'&&p->name[1]=='s')
+      {
+        
+         p->priority=3;
+      }*/
+      cprintf("%s\t%d\tRUNNING \t%d\t%d\t", p->name, p->pid, p->priority, p->sz);
+      if(p->parent)
+      {
+        cprintf("%d", p->parent->pid);
+      }
+      else
+        cprintf("parent");
+      cprintf("\n");
+    }
+    else if(p->state == RUNNABLE)
+    {
+      cprintf("%s\t%d\tRUNNABLE\t%d\t%d\t", p->name, p->pid, p->priority, p->sz);
+      if(p->parent)
+      {
+        cprintf("%d", p->parent->pid);
+      }
+      else
+        cprintf("parent");
+      cprintf("\n");
+    }
+  }
+
+  release(&ptable.lock);
+  return 27;
+}
+
 //PAGEBREAK: 32
 // Look in the process table for an UNUSED proc.
 // If found, change state to EMBRYO and initialize
 // state required to run in the kernel.
 // Otherwise return 0.
+//static struct pstat stat;
 static struct proc*
 allocproc(void)
 {
@@ -88,9 +145,20 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-
+  p->priority = 10;
+  pstat.inuse[p-ptable.proc] = 1;
+  pstat.pid[p-ptable.proc] = p->pid;
+  //pstat.name[p-ptable.proc] = p->name;
+  pstat.name[p-ptable.proc][0] = p->name[0];
+  pstat.name[p-ptable.proc][1] = p->name[1];
+  pstat.name[p-ptable.proc][2] = p->name[2];
+  pstat.hticks[p-ptable.proc] = 0;
+  pstat.lticks[p-ptable.proc] = 0;
+  pstat.state = p->state;
+  pstat.priority = p->priority;
   release(&ptable.lock);
 
+   
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
     p->state = UNUSED;
@@ -324,24 +392,34 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
+  int max_pri=20;
   c->proc = 0;
   
   for(;;){
     // Enable interrupts on this processor.
     sti();
-
+    //struct proc *p_h;
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
-
+      /*p_h=p;
+      for (p_pri=ptable.proc; p_pri<&ptable.proc[NPROC]; p_pri++)
+      {
+       if(p_pri->state!=RUNNABLE)
+         continue;
+       if(p_h->priority>p_pri->priority)
+         p_h=p_pri;
+      }
+      p=p_h;*/
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
+     
 
       swtch(&(c->scheduler), p->context);
       switchkvm();
@@ -350,6 +428,14 @@ scheduler(void)
       // It should have changed its p->state before coming back.
       c->proc = 0;
     }
+    for(p=ptable.proc; p< &ptable.proc[NPROC]; p++){
+      if(p->priority!=0&&p->priority<=max_pri)
+      {  
+	max_pri=p->priority;
+       
+      }
+    }
+
     release(&ptable.lock);
 
   }
@@ -450,7 +536,44 @@ sleep(void *chan, struct spinlock *lk)
     acquire(lk);
   }
 }
+int
+prisleep(int curmaxpri)
+{
+  struct proc *p;
+  //for(p1=ptable.proc;p1<&ptable.proc[NPROC]; p1++)
+  //{
+    acquire(&ptable.lock);
+  
+    for(p=ptable.proc;p<&ptable.proc[NPROC]&&p->pid!=0; p++)
+    { 
+      if(p->state!=SLEEPING&&p->priority<=curmaxpri)
+      {
+        p->last_state=p->state;
+        p->state=SLEEPING;
+        //break;
+      }
+    }
+    release(&ptable.lock);
+  //}
+  return p->pid;
+}
 
+
+int
+priawake(int curmaxpri)
+{
+  struct proc *p;
+  acquire(&ptable.lock);
+  for(p=ptable.proc;p<&ptable.proc[NPROC]&&p->pid!=0; p++)
+  {
+    if(p->state==SLEEPING&&p->pid>2&&p->priority<=curmaxpri)
+    {
+      p->state=p->last_state;
+    }
+  }
+  release(&ptable.lock);
+  return p->pid;
+}
 //PAGEBREAK!
 // Wake up all processes sleeping on chan.
 // The ptable lock must be held.
@@ -531,4 +654,24 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+int
+chpr(int pid, int priority)
+{
+  struct proc *p;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+  {
+    if(p->pid == pid)
+    {
+      p->priority = priority;
+      break;
+    }
+  }
+  release(&ptable.lock);
+
+  return pid;
+
 }

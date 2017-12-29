@@ -1,3 +1,5 @@
+#include "pstat.h"
+
 struct stat;
 struct rtcdate;
 
@@ -23,7 +25,13 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
-
+int alarm(int ticks, void (*handler)());
+int getppid(void);
+int getAllPids(struct pstat*);
+int cps(void);
+int chpr(int pid, int priority);
+int prisleep(int curmaxpri);
+int priawake(int curmaxpri);
 // ulib.c
 int stat(char*, struct stat*);
 char* strcpy(char*, char*);
